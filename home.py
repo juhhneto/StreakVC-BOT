@@ -80,6 +80,7 @@ async def streak(interaction: discord.Interaction):
     print(f"> {Style.BRIGHT}{user}{Style.RESET_ALL} used the /streak command.")
 
     streak_icon = "<:streakicon:1389711098416070777>"
+    noStreak_icon = "<:nostreak:1389730597194301593>"
 
     total_minutes = 0
     current_streak = 0
@@ -110,24 +111,25 @@ async def streak(interaction: discord.Interaction):
 
     # Create a nice embed response
     embed = discord.Embed(
-        title=f"{streak_icon} Streak of {user.display_name}",
+        title=f"Streak of {user.display_name}",
         color=discord.Color.orange()
     )
     embed.set_thumbnail(url=user.display_avatar.url)
+
+    # Determine streak display and footer
     if current_streak == 0:
-        embed.add_field(name="Current Streak", value="**No streak :/**", inline=True)
-        embed.add_field(name="Total Time in Voice", value=f"⏰ **{total_minutes}** minutes", inline=True)
+        streak_value = f"{noStreak_icon} **No streak :/**"
         embed.set_footer(text="Spend more than 30 minutes in a voice channel to start your streak!")
-
     elif current_streak == 1:
-        embed.add_field(name="Total Time in Voice", value=f"⏰ **{total_minutes}** minutes", inline=True)
-        embed.add_field(name="Current Streak", value=f"{streak_icon} ** {current_streak}** day", inline=True)
-    else:  # Handles streaks > 1
-        embed.add_field(name="Current Streak", value=f"{streak_icon} **{current_streak}** days", inline=True)
-        embed.add_field(name="Total Time in Voice", value=f"⏰ **{total_minutes}** minutes", inline=True)
-    if current_streak >=1:
-       embed.set_footer(text="Keep it up to keep your flame alive!")
+        streak_value = f"{streak_icon} **{current_streak}** day"
+        embed.set_footer(text="Keep it up to keep your flame alive!")
+    else:  # streak > 1
+        streak_value = f"{streak_icon} **{current_streak}** days"
+        embed.set_footer(text="Keep it up to keep your flame alive!")
 
+    # Add fields in a consistent order
+    embed.add_field(name="Current Streak", value=streak_value, inline=True)
+    embed.add_field(name="Total Time in Voice", value=f"⏰ **{total_minutes}** minutes", inline=True)
 
     await interaction.response.send_message(embed=embed)
 
