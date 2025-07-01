@@ -8,15 +8,15 @@ import datetime
 from colorama import Fore, Style, init
 from cachetools import TTLCache
 
-# --- CONFIGURAÇÃO INICIAL ---
+# --- INITIAL SETUP ---
 if sys.version_info < (3, 8) or sys.version_info > (3, 13):
-    exit("Only versions between Python 3.8 and 3.13 is supported")
+    exit("Only versions between Python 3.8 and 3.13 are supported")
 
 init(autoreset=True)
 
 DB_NAME = 'streakVCBot.db'
 
-# Carregar o token
+# Load the token
 try:
     with open('config.json', 'r') as f:
         config = json.load(f)
@@ -26,9 +26,9 @@ try:
 except FileNotFoundError:
     exit("config.json not found. Please create it and add your bot token.")
 
-# --- BANCO DE DADOS ---
+# --- DATABASE ---
 def setup_database():
-    """Inicializa o banco de dados e a tabela se não existirem."""
+    """Initializes the database and the table if they don't exist."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS voice_activity(
@@ -39,7 +39,7 @@ def setup_database():
     conn.commit()
     conn.close()
 
-# --- INICIALIZAÇÃO DO BOT ---
+# --- BOT INITIALIZATION ---
 intents = discord.Intents.default()
 intents.voice_states = True
 intents.messages = True
@@ -47,23 +47,22 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# --- CACHE E ESTADO GLOBAL ---
+# --- CACHE AND GLOBAL STATE ---
 leaderboard_cache = TTLCache(maxsize=100, ttl=300)
-streak_icon = "icon.png"
 user_join_times = {}
 
-# --- EVENTOS E COMANDOS DO BOT ---
+# --- BOT EVENTS AND COMMANDS ---
 @bot.event
 async def on_ready():
-    """Chamado quando o bot está pronto e conectado."""
+    """Called when the bot is ready and connected."""
     setup_database()
-    print(f"{Fore.GREEN}Banco de dados conectado e verificado.")
+    print(f"{Fore.GREEN}Database connected and verified.")
 
     try:
         synced = await bot.tree.sync()
-        print(f"{Fore.CYAN}Sincronizados {len(synced)} comandos de barra.")
+        print(f"{Fore.CYAN}Synced {len(synced)} slash commands.")
     except Exception as e:
-        print(f"{Fore.RED}Erro ao sincronizar comandos: {e}")
+        print(f"{Fore.RED}Error syncing commands: {e}")
     
     if not bot.user:
         return
@@ -74,11 +73,13 @@ async def on_ready():
         {Fore.LIGHTBLUE_EX}https://discord.com/api/oauth2/authorize?client_id={bot.user.id}&scope=applications.commands%20bot{Fore.RESET}
     """), end="\n\n")
 
-@bot.tree.command(name="streak", description="Verifica seu streak atual e tempo total em VC.")
+@bot.tree.command(name="streak", description="Checks your current streak and total time in VC.")
 async def streak(interaction: discord.Interaction):
-    """Exibe o streak do usuário e o tempo total em canais de voz."""
+    """Displays the user's streak and total time in voice channels."""
     user = interaction.user
-    print(f"> {Style.BRIGHT}{user}{Style.RESET_ALL} usou o comando /streak.")
+    print(f"> {Style.BRIGHT}{user}{Style.RESET_ALL} used the /streak command.")
+
+    streak_icon = "<:streakicon:1389711098416070777>"
 
     try:
         conn = sqlite3.connect(DB_NAME)
@@ -92,60 +93,60 @@ async def streak(interaction: discord.Interaction):
             current_streak, total_minutes = 0, 0
 
     except sqlite3.Error as e:
-        print(f"{Fore.RED}Erro ao buscar streak para {user.name}: {e}")
-        await interaction.response.send_message("Ocorreu um erro ao buscar seus dados. Tente novamente mais tarde.", ephemeral=True)
+        print(f"{Fore.RED}Error fetching streak for {user.name}: {e}")
+        await interaction.response.send_message("An error occurred while fetching your data. Please try again later.", ephemeral=True)
         return
     finally:
         if conn:
             conn.close()
 
-    # Cria uma resposta bonita (Embed)
+    # Create a nice embed response
     embed = discord.Embed(
-        title=f"{streak_icon} Streak de {user.display_name}",
+        title=f"{streak_icon} Streak of {user.display_name}",
         color=discord.Color.orange()
     )
     embed.set_thumbnail(url=user.display_avatar.url)
-    embed.add_field(name=f"{streak_icon} Sequência Atual", value=f"**{current_streak}** dias", inline=True)
-    embed.add_field(name="⏰ Tempo Total em Voz", value=f"**{total_minutes}** minutos", inline=True)
+    embed.add_field(name=f"{streak_icon} Current Streak", value=f"**{current_streak}** days", inline=True)
+    embed.add_field(name="⏰ Total Time in Voice", value=f"**{total_minutes}** minutes", inline=True)
 
     if current_streak == 0:
-        embed.set_footer(text="Passe mais de 30 minutos em um canal de voz para começar seu streak!")
+        embed.set_footer(text="Spend more than 30 minutes in a voice channel to start your streak!")
     else:
-        embed.set_footer(text="Continue assim para manter sua chama acesa!")
+        embed.set_footer(text="Keep it up to keep your flame alive!")
 
     await interaction.response.send_message(embed=embed)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    """Rastreia quando um usuário entra ou sai de um canal de voz."""
+    """Tracks when a user joins or leaves a voice channel."""
     if member.bot:
         return
 
-    # Usuário entra em um canal de voz
+    # User joins a voice channel
     if before.channel is None and after.channel is not None:
-        print(f"{member.name} entrou no canal de voz {after.channel.name}.")
+        print(f"{member.name} joined voice channel {after.channel.name}.")
         user_join_times[member.id] = datetime.datetime.now()
 
-    # Usuário sai de um canal de voz
+    # User leaves a voice channel
     elif before.channel is not None and after.channel is None:
         if member.id in user_join_times:
             start_time = user_join_times.pop(member.id)
             duration_seconds = (datetime.datetime.now() - start_time).total_seconds()
             duration_minutes = duration_seconds / 60
             
-            print(f"{member.name} ficou em VC por {duration_minutes:.2f} minutos.")
+            print(f"{member.name} was in VC for {duration_minutes:.2f} minutes.")
 
             try:
                 conn = sqlite3.connect(DB_NAME)
                 c = conn.cursor()
 
-                # Primeiro, garanta que o usuário exista e atualize o tempo total em minutos
+                # First, ensure the user exists and update the total time in minutes
                 c.execute("UPDATE voice_activity SET total_vc_minutes = total_vc_minutes + ? WHERE user_id = ?", (int(duration_minutes), member.id))
                 if c.rowcount == 0:
                     c.execute("INSERT INTO voice_activity (user_id, total_vc_minutes) VALUES (?, ?)", (member.id, int(duration_minutes)))
                 conn.commit()
 
-                # Agora, lide com a lógica de streak se a duração for maior que 30 minutos
+                # Now, handle the streak logic if the duration is longer than 30 minutes
                 if duration_minutes > 30:
                     c.execute("SELECT streak, last_activity_date FROM voice_activity WHERE user_id = ?", (member.id,))
                     result = c.fetchone()
@@ -153,27 +154,27 @@ async def on_voice_state_update(member, before, after):
 
                     today_str = datetime.date.today().isoformat()
 
-                    # Só atualiza o streak se a última atividade não foi hoje
+                    # Only update the streak if the last activity was not today
                     if last_date_str != today_str:
                         yesterday_str = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
                         
                         new_streak = 0
                         if last_date_str == yesterday_str:
                             new_streak = current_streak + 1
-                            print(f"Streak de {member.name} continuou! Novo streak: {new_streak}")
+                            print(f"{member.name}'s streak continued! New streak: {new_streak}")
                         else:
-                            new_streak = 1 # Começa um novo streak
-                            print(f"Novo streak iniciado para {member.name}.")
+                            new_streak = 1 # Starts a new streak
+                            print(f"New streak started for {member.name}.")
                         
                         c.execute("UPDATE voice_activity SET streak = ?, last_activity_date = ? WHERE user_id = ?", (new_streak, today_str, member.id))
                         conn.commit()
 
             except sqlite3.Error as e:
-                print(f"{Fore.RED}Erro no banco de dados: {e}")
+                print(f"{Fore.RED}Database error: {e}")
             finally:
                 if conn:
                     conn.close()
 
-# --- EXECUÇÃO DO BOT ---
+# --- BOT EXECUTION ---
 if __name__ == "__main__":
     bot.run(token)
