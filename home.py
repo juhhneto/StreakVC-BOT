@@ -16,7 +16,7 @@ init(autoreset=True)
 
 DB_NAME = 'streakVCBot.db'
 
-# Load the token
+
 try:
     with open('config.json', 'r') as f:
         config = json.load(f)
@@ -102,7 +102,7 @@ async def streak(interaction: discord.Interaction):
         if conn:
             conn.close()
 
-    # Add time from the current session if the user is in a voice channel
+
     if user.id in user_join_times:
         join_time = user_join_times[user.id]
         current_session_seconds = (datetime.datetime.now() - join_time).total_seconds()
@@ -116,7 +116,6 @@ async def streak(interaction: discord.Interaction):
     )
     embed.set_thumbnail(url=user.display_avatar.url)
 
-    # Determine streak display and footer
     if current_streak == 0:
         streak_value = f"{noStreak_icon} **No streak :/**"
         embed.set_footer(text="Spend more than 30 minutes in a voice channel to start your streak!")
@@ -133,16 +132,17 @@ async def streak(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
+
 @bot.event
 async def on_voice_state_update(member, before, after):
     """Tracks when a user joins or leaves a voice channel."""
     if member.bot:
         return
 
-    # User joins a voice channel
+    # User joins a voice channel or moves to a new one
     if before.channel is None and after.channel is not None:
-        print(f"{member.name} joined voice channel {after.channel.name}.")
         user_join_times[member.id] = datetime.datetime.now()
+        print(f"{member.name} joined VC.")
         return
 
     # User leaves a voice channel
@@ -165,7 +165,6 @@ async def on_voice_state_update(member, before, after):
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
 
-            # Get current user data
             c.execute("SELECT streak, total_vc_minutes, last_activity_date FROM voice_activity WHERE user_id = ?", (member.id,))
             result = c.fetchone()
 
@@ -176,31 +175,29 @@ async def on_voice_state_update(member, before, after):
                 current_streak, total_minutes, last_date_str = result
                 new_total_minutes = total_minutes + duration_minutes
                 new_streak = current_streak
-                new_last_activity_date = last_date_str
 
-                # Update streak if session > 30 mins and not already counted today
                 if duration_minutes > 30 and last_date_str != today_str:
-                    yesterday_str = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-                    if last_date_str == yesterday_str:
-                        new_streak = current_streak + 1
+                    yesterday = datetime.date.today() - datetime.timedelta(days=1)
+                    if last_date_str == yesterday.isoformat():
+                        new_streak += 1
                         print(f"{member.name}'s streak continued! New streak: {new_streak}")
                     else:
                         new_streak = 1
                         print(f"New streak started for {member.name}.")
-                    new_last_activity_date = today_str
-                c.execute("UPDATE voice_activity SET total_vc_minutes = ?, streak = ?, last_activity_date = ? WHERE user_id = ?",
-                          (new_total_minutes, new_streak, new_last_activity_date, member.id))
+                    c.execute("UPDATE voice_activity SET total_vc_minutes = ?, streak = ?, last_activity_date = ? WHERE user_id = ?",
+                              (new_total_minutes, new_streak, today_str, member.id))
+                else:
+                    c.execute("UPDATE voice_activity SET total_vc_minutes = ? WHERE user_id = ?",
+                              (new_total_minutes, member.id))
             else:
                 # New user
                 new_streak = 1 if duration_minutes > 30 else 0
                 new_last_activity_date = today_str if new_streak > 0 else None
-                
                 c.execute("INSERT INTO voice_activity (user_id, total_vc_minutes, streak, last_activity_date) VALUES (?, ?, ?, ?)",
                           (member.id, duration_minutes, new_streak, new_last_activity_date))
-                
                 if new_streak > 0:
                     print(f"New streak started for {member.name}.")
-
+            
             conn.commit()
 
         except sqlite3.Error as e:
