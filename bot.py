@@ -381,6 +381,18 @@ async def on_ready():
     except Exception as e:
         print(f"{Fore.RED}Error syncing commands: {e}")
 
+    # Auto-detecta membros já presentes nos canais ao iniciar
+    now = datetime.datetime.now()
+    for vc in bot.voice_clients:
+        if vc.channel:
+            guild_id    = vc.channel.guild.id
+            current_ids = {m.id for m in vc.channel.members if not m.bot}
+            channel_members_snapshot[vc.channel.id] = current_ids
+            for uid in current_ids:
+                user_join_times.setdefault(uid, now)
+                user_guild_map.setdefault(uid, guild_id)
+            print(f"{Fore.CYAN}Auto-detected {len(current_ids)} member(s) already in '{vc.channel.name}'.")
+
     poll_voice_channels.start()
     print(f"{Fore.CYAN}Voice poll started (60s). Progress saved every tick.")
 
