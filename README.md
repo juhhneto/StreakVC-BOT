@@ -13,7 +13,6 @@ A Discord bot that tracks voice channel activity, builds daily streaks, and rank
 -  **Weekly ranking** — top 3 members by weekly voice time per server
 -  **Multi-server support** — each server has its own independent data
 -  **Bilingual** — supports Portuguese 🇧🇷 and English 🇺🇸
--  **Mid-session flush** — saves progress every 30 minutes without requiring the user to leave VC
 
 ---
 
@@ -21,7 +20,7 @@ A Discord bot that tracks voice channel activity, builds daily streaks, and rank
 
 The bot joins a voice channel via `/join` and polls it every **60 seconds**, tracking which members are present. When a member leaves, their session duration is saved to the database.
 
-Every **30 minutes**, active sessions are flushed to the database so that `/streak` reflects live progress without needing to disconnect.
+Every **60 seconds**, active sessions are flushed to the database so that `/streak` reflects live progress without needing to disconnect.
 
 A streak day is counted once the member accumulates **30 minutes** of voice time in a single day. Streaks reset if a day is missed.
 
