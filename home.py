@@ -16,9 +16,8 @@ from i18n import t, set_lang, get_lang
 # --- INITIAL SETUP ---
 if sys.version_info < (3, 8) or sys.version_info > (3, 13):
     exit("Only versions between Python 3.8 and 3.13 are supported")
-  # se estiver usando arquivo .env
 
-load_dotenv()  # carrega o .env (remova se usar env do sistema)
+load_dotenv()
 
 token = os.getenv("DISCORD_TOKEN")
 
@@ -34,8 +33,6 @@ DB_NAME = 'streakVCBot.db'
 # --- XP AND LEVEL SYSTEM ---
 XP_PER_MINUTE = 1
 
-# (min_xp, level_number, i18n_title_key, emoji) 
-# MEU DEUS QUANTO NIVEL KKKKKKKKKKKKKKKKKKKK
 LEVEL_THRESHOLDS = [
     (0,    1, "level_1", "🌱"),
     (30,   2, "level_2", "📚"),
@@ -112,7 +109,7 @@ def build_xp_bar(xp_in_level: int, xp_to_next, bar_length: int = 10) -> str:
     bar      = "█" * filled + "░" * (bar_length - filled)
     return f"`[{bar}]` {xp_in_level}/{xp_to_next} XP"
 
-def format_time(total_minutes: int) -> str:  #timezone
+def format_time(total_minutes: int) -> str:
     hours = total_minutes // 60
     mins  = total_minutes % 60
     if hours > 0:
@@ -124,7 +121,6 @@ def get_current_week_start() -> str:
     return (today - datetime.timedelta(days=today.weekday())).isoformat()
 
 # --- DATABASE ---
-# All columns the table must have: (name, definition)
 _REQUIRED_COLUMNS = [
     ("username",          "TEXT"),
     ("streak",            "INTEGER DEFAULT 0"),
@@ -133,47 +129,38 @@ _REQUIRED_COLUMNS = [
     ("last_reset_date",   "TEXT"),
     ("weekly_vc_minutes", "INTEGER DEFAULT 0"),
     ("week_start_date",   "TEXT"),
-    # legacy column — kept so old DBs don't break
     ("last_activity_date","TEXT"),
     ("total_vc_minutes",  "INTEGER DEFAULT 0"),
 ]
 
 def setup_database():
-    """
-    Creates the table if it doesn't exist, then adds any missing columns
-    so existing databases from older bot versions are migrated automatically.
-    """
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
 
-    # Create table with the minimum required schema
     c.execute('''CREATE TABLE IF NOT EXISTS voice_activity (
-                    user_id            INTEGER PRIMARY KEY,
-                    username           TEXT,
-                    streak             INTEGER DEFAULT 0,
-                    last_streak_date   TEXT,
-                    daily_vc_minutes   INTEGER DEFAULT 0,
-                    last_reset_date    TEXT,
-                    weekly_vc_minutes  INTEGER DEFAULT 0,
-                    week_start_date    TEXT
+                    user_id INTEGER,
+                    guild_id INTEGER,
+                    username TEXT,
+                    streak INTEGER DEFAULT 0,
+                    last_streak_date TEXT,
+                    daily_vc_minutes INTEGER DEFAULT 0,
+                    last_reset_date TEXT,
+                    weekly_vc_minutes INTEGER DEFAULT 0,
+                    week_start_date TEXT,
+                    PRIMARY KEY (user_id, guild_id)
                 )''')
 
-    # Detect existing columns
     c.execute("PRAGMA table_info(voice_activity)")
     existing_columns = {row[1] for row in c.fetchall()}
 
-    # Add any column that is missing (SQLite doesn't support ADD COLUMN IF NOT EXISTS)
     for col_name, col_def in _REQUIRED_COLUMNS:
         if col_name not in existing_columns:
             c.execute(f"ALTER TABLE voice_activity ADD COLUMN {col_name} {col_def}")
             print(f"{Fore.YELLOW}Migration: added column '{col_name}' to voice_activity.")
 
-    # Re-fetch columns after potential additions
     c.execute("PRAGMA table_info(voice_activity)")
     existing_columns = {row[1] for row in c.fetchall()}
 
-    # ── Data migration: copy old column values into new column names ─────────
-    # last_activity_date → last_streak_date  (old name for the same concept)
     if "last_activity_date" in existing_columns and "last_streak_date" in existing_columns:
         c.execute("""
             UPDATE voice_activity
@@ -183,9 +170,6 @@ def setup_database():
         if c.rowcount:
             print(f"{Fore.YELLOW}Migration: copied last_activity_date → last_streak_date for {c.rowcount} user(s).")
 
-    # total_vc_minutes → daily_vc_minutes + weekly_vc_minutes
-    # We treat the old total as this week's minutes so users appear in the ranking.
-    # daily_vc_minutes stays 0 because we don't know what day it was from.
     if "total_vc_minutes" in existing_columns and "weekly_vc_minutes" in existing_columns:
         c.execute("""
             UPDATE voice_activity
@@ -199,7 +183,7 @@ def setup_database():
     conn.commit()
     conn.close()
 
-def commit_session(member_id: int, display_name: str, duration_minutes: int):
+def commit_session(member_id: int, guild_id: int, display_name: str, duration_minutes: int):
     """
     Saves a VC session.
     - Resets daily counter when the day changes (flushing into weekly first).
@@ -220,7 +204,8 @@ def commit_session(member_id: int, display_name: str, duration_minutes: int):
         c.execute("""SELECT streak, last_streak_date,
                             daily_vc_minutes, last_reset_date,
                             weekly_vc_minutes, week_start_date
-                     FROM voice_activity WHERE user_id = ?""", (member_id,))
+                     FROM voice_activity WHERE user_id = ? AND guild_id = ?""",
+                  (member_id, guild_id))
         row = c.fetchone()
 
         if row:
@@ -260,11 +245,11 @@ def commit_session(member_id: int, display_name: str, duration_minutes: int):
                          SET username=?, streak=?, last_streak_date=?,
                              daily_vc_minutes=?, last_reset_date=?,
                              weekly_vc_minutes=?, week_start_date=?
-                         WHERE user_id=?""",
+                         WHERE user_id=? AND guild_id=?""",
                       (display_name, new_streak, new_last_streak,
                        daily_minutes, today_str,
                        weekly_minutes, week_start,
-                       member_id))
+                       member_id, guild_id))
         else:
             new_streak      = 1 if duration_minutes >= 30 else 0
             new_last_streak = today_str if new_streak > 0 else None
@@ -272,11 +257,11 @@ def commit_session(member_id: int, display_name: str, duration_minutes: int):
                 print(f"{Fore.GREEN}First streak started for {display_name}.")
 
             c.execute("""INSERT INTO voice_activity
-                         (user_id, username, streak, last_streak_date,
+                         (user_id, guild_id, username, streak, last_streak_date,
                           daily_vc_minutes, last_reset_date,
                           weekly_vc_minutes, week_start_date)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                      (member_id, display_name, new_streak, new_last_streak,
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                      (member_id, guild_id, display_name, new_streak, new_last_streak,
                        duration_minutes, today_str,
                        duration_minutes, current_week))
 
@@ -299,24 +284,57 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 leaderboard_cache = TTLCache(maxsize=100, ttl=300)
-user_join_times: dict[int, datetime.datetime]   = {}
-channel_members_snapshot: dict[int, set[int]]   = {}
+user_join_times: dict[int, datetime.datetime]        = {}
+user_guild_map:  dict[int, int]                      = {}  # uid -> guild_id
+channel_members_snapshot: dict[int, set[int]]        = {}
 
 
 # --- POLLING TASK ---
 @tasks.loop(seconds=60)
 async def poll_voice_channels():
+    # Canais que o bot está atualmente conectado
+    active_channel_ids = {vc.channel.id for vc in bot.voice_clients if vc.channel}
+
+    # Canais que estavam no snapshot mas o bot não está mais conectado
+    for channel_id in list(channel_members_snapshot.keys()):
+        if channel_id not in active_channel_ids:
+            now = datetime.datetime.now()
+            # Tenta recuperar a guild pelo snapshot — busca em todas as guilds
+            guild_id = None
+            for vc in bot.voice_clients:
+                if vc.channel and vc.channel.id == channel_id:
+                    guild_id = vc.channel.guild.id
+                    break
+            for uid in channel_members_snapshot[channel_id]:
+                if uid in user_join_times:
+                    start      = user_join_times.pop(uid)
+                    duration_m = int((now - start).total_seconds() / 60)
+                    gid        = user_guild_map.pop(uid, guild_id)
+                    name       = str(uid)
+                    if gid:
+                        guild = bot.get_guild(gid)
+                        if guild:
+                            member = guild.get_member(uid)
+                            if member:
+                                name = member.display_name
+                    print(f"{Fore.YELLOW}Bot saiu de canal — commitando {name}: {duration_m} min.")
+                    if gid:
+                        commit_session(uid, gid, name, duration_m)
+            del channel_members_snapshot[channel_id]
+
     for voice_client in bot.voice_clients:
         channel = voice_client.channel
         if channel is None:
             continue
 
+        guild_id    = channel.guild.id
         current_ids = {m.id for m in channel.members if not m.bot}
         prev_ids    = channel_members_snapshot.get(channel.id, set())
 
         for uid in current_ids - prev_ids:
             if uid not in user_join_times:
                 user_join_times[uid] = datetime.datetime.now()
+                user_guild_map[uid]  = guild_id
                 member = channel.guild.get_member(uid)
                 name   = member.display_name if member else str(uid)
                 print(f"{Fore.CYAN}{name} detected in '{channel.name}'.")
@@ -324,11 +342,12 @@ async def poll_voice_channels():
         for uid in prev_ids - current_ids:
             if uid in user_join_times:
                 start      = user_join_times.pop(uid)
+                gid        = user_guild_map.pop(uid, guild_id)
                 duration_m = int((datetime.datetime.now() - start).total_seconds() / 60)
                 member     = channel.guild.get_member(uid)
                 name       = member.display_name if member else str(uid)
                 print(f"{Fore.YELLOW}{name} left after {duration_m} min.")
-                commit_session(uid, name, duration_m)
+                commit_session(uid, gid, name, duration_m)
 
         channel_members_snapshot[channel.id] = current_ids
 
@@ -337,12 +356,6 @@ async def before_poll():
     await bot.wait_until_ready()
 
 
-# Periodic mid-session flush every 30 minutes.
-# Commits progress to the DB while the user is still in VC so that:
-#   - /streak shows the correct streak without needing to leave first
-#   - /ranking reflects live weekly totals
-# After flushing, the join time is reset to "now" so the next flush
-# only adds the NEW minutes since the last save (no double-counting).
 @tasks.loop(minutes=30)
 async def flush_active_sessions():
     now = datetime.datetime.now()
@@ -351,18 +364,22 @@ async def flush_active_sessions():
         if duration_m <= 0:
             continue
 
-        # Find which guild/channel this user is in
         display_name = str(uid)
+        guild_id     = user_guild_map.get(uid)
+
         for vc in bot.voice_clients:
             member = vc.channel.guild.get_member(uid) if vc.channel else None
             if member:
                 display_name = member.display_name
+                guild_id     = vc.channel.guild.id
                 break
 
-        print(f"{Fore.BLUE}Mid-session flush: {display_name} — {duration_m} min.")
-        commit_session(uid, display_name, duration_m)
+        if not guild_id:
+            print(f"{Fore.RED}Mid-session flush: guild_id not found for {uid}, skipping.")
+            continue
 
-        # Reset join time to now so we don't count these minutes again
+        print(f"{Fore.BLUE}Mid-session flush: {display_name} — {duration_m} min.")
+        commit_session(uid, guild_id, display_name, duration_m)
         user_join_times[uid] = now
 
 @flush_active_sessions.before_loop
@@ -414,8 +431,6 @@ async def join_cmd(interaction: discord.Interaction):
             t("join_already", channel=channel.name), ephemeral=True)
         return
 
-    # Defer immediately — voice connection can take several seconds and
-    # Discord only allows 3s before the interaction token expires.
     await interaction.response.defer()
 
     try:
@@ -428,11 +443,13 @@ async def join_cmd(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Could not connect to **{channel.name}**: {e}", ephemeral=True)
         return
 
-    now = datetime.datetime.now()
+    now         = datetime.datetime.now()
+    guild_id    = interaction.guild.id
     current_ids = {m.id for m in channel.members if not m.bot}
     channel_members_snapshot[channel.id] = current_ids
     for uid in current_ids:
         user_join_times.setdefault(uid, now)
+        user_guild_map.setdefault(uid, guild_id)
 
     print(f"{Fore.GREEN}Bot connected to '{channel.name}' with {len(current_ids)} member(s).")
     await interaction.followup.send(t("join_success", channel=channel.name))
@@ -444,16 +461,18 @@ async def leave_cmd(interaction: discord.Interaction):
         await interaction.response.send_message(t("leave_not_connected"), ephemeral=True)
         return
 
-    channel = interaction.guild.voice_client.channel
-    now     = datetime.datetime.now()
+    channel  = interaction.guild.voice_client.channel
+    guild_id = interaction.guild.id
+    now      = datetime.datetime.now()
 
     saved = []
     for uid in list(user_join_times.keys()):
         start      = user_join_times.pop(uid)
+        gid        = user_guild_map.pop(uid, guild_id)
         duration_m = int((now - start).total_seconds() / 60)
         member     = interaction.guild.get_member(uid)
         name       = member.display_name if member else str(uid)
-        commit_session(uid, name, duration_m)
+        commit_session(uid, gid, name, duration_m)
         saved.append(name)
 
     channel_members_snapshot.pop(channel.id, None)
@@ -467,7 +486,12 @@ async def leave_cmd(interaction: discord.Interaction):
 
 @bot.tree.command(name="streak", description="Show your streak, today's voice time and level. / Ver frequência.")
 async def streak_cmd(interaction: discord.Interaction):
-    user = interaction.user
+    if not interaction.guild:
+        await interaction.response.send_message(t("server_only"), ephemeral=True)
+        return
+
+    user     = interaction.user
+    guild_id = interaction.guild.id
     print(f"> {Style.BRIGHT}{user}{Style.RESET_ALL} used /streak.")
 
     streak_icon   = "<:streakicon:1389711098416070777>"
@@ -475,11 +499,13 @@ async def streak_cmd(interaction: discord.Interaction):
     current_streak = 0
     daily_minutes  = 0
 
+    conn = None
     try:
         conn = sqlite3.connect(DB_NAME)
         c    = conn.cursor()
         c.execute("""SELECT streak, daily_vc_minutes, last_reset_date, last_streak_date
-                     FROM voice_activity WHERE user_id = ?""", (user.id,))
+                     FROM voice_activity WHERE user_id = ? AND guild_id = ?""",
+                  (user.id, guild_id))
         row = c.fetchone()
         last_streak_date = None
         if row:
@@ -502,9 +528,6 @@ async def streak_cmd(interaction: discord.Interaction):
     xp_bar       = build_xp_bar(xp_in_level, xp_to_next)
     minutes_left = max(0, 30 - daily_minutes)
 
-    # Compute tentative streak: if the live session already qualifies (>=30 min)
-    # but the DB hasn't been updated yet (user is still in VC), show what the
-    # streak WILL be once they leave.
     today_str      = datetime.date.today().isoformat()
     yesterday_str  = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
     tentative_streak = current_streak
@@ -557,7 +580,8 @@ async def ranking_cmd(interaction: discord.Interaction):
         await interaction.response.send_message(t("server_only"), ephemeral=True)
         return
 
-    cache_key = "weekly_ranking"
+    guild_id  = interaction.guild.id
+    cache_key = f"weekly_ranking:{guild_id}"
     top_users = leaderboard_cache.get(cache_key)
 
     if top_users is None:
@@ -573,13 +597,14 @@ async def ranking_cmd(interaction: discord.Interaction):
                            ELSE 0
                        END AS total_week_minutes
                 FROM voice_activity
-                WHERE (
+                WHERE guild_id = ?
+                  AND (
                     weekly_vc_minutes > 0
                     OR (week_start_date = ? AND daily_vc_minutes > 0)
-                )
+                  )
                 ORDER BY total_week_minutes DESC, streak DESC
                 LIMIT 3
-            """, (current_week, today_str, current_week))
+            """, (current_week, today_str, guild_id, current_week))
             top_users = c.fetchall()
             leaderboard_cache[cache_key] = top_users
         except sqlite3.Error as e:
@@ -627,12 +652,11 @@ async def language_cmd(interaction: discord.Interaction, lang: app_commands.Choi
     current = get_lang()
 
     if current == lang.value:
-        # Already set — reply in the current language
         await interaction.response.send_message(t("lang_already"), ephemeral=True)
         return
 
     set_lang(lang.value)
-    leaderboard_cache.clear()  # cached embeds had the old language
+    leaderboard_cache.clear()
     print(f"{Fore.CYAN}Language changed to '{lang.value}' by {interaction.user}.")
     await interaction.response.send_message(t("lang_changed"))
 
