@@ -122,6 +122,7 @@ def get_current_week_start() -> str:
 
 # --- DATABASE ---
 _REQUIRED_COLUMNS = [
+    ("guild_id",          "INTEGER DEFAULT 0"),  # migration for old DBs without guild_id
     ("username",          "TEXT"),
     ("streak",            "INTEGER DEFAULT 0"),
     ("last_streak_date",  "TEXT"),
@@ -349,41 +350,23 @@ async def poll_voice_channels():
                 print(f"{Fore.YELLOW}{name} left after {duration_m} min.")
                 commit_session(uid, gid, name, duration_m)
 
+        # Flush active users still in channel — saves 1 min of progress per tick
+        now = datetime.datetime.now()
+        for uid in current_ids:
+            if uid in user_join_times:
+                start      = user_join_times[uid]
+                duration_m = int((now - start).total_seconds() / 60)
+                if duration_m <= 0:
+                    continue
+                member = channel.guild.get_member(uid)
+                name   = member.display_name if member else str(uid)
+                commit_session(uid, guild_id, name, duration_m)
+                user_join_times[uid] = now  # reset timer to avoid double-counting
+
         channel_members_snapshot[channel.id] = current_ids
 
 @poll_voice_channels.before_loop
 async def before_poll():
-    await bot.wait_until_ready()
-
-
-@tasks.loop(minutes=30)
-async def flush_active_sessions():
-    now = datetime.datetime.now()
-    for uid, join_time in list(user_join_times.items()):
-        duration_m = int((now - join_time).total_seconds() / 60)
-        if duration_m <= 0:
-            continue
-
-        display_name = str(uid)
-        guild_id     = user_guild_map.get(uid)
-
-        for vc in bot.voice_clients:
-            member = vc.channel.guild.get_member(uid) if vc.channel else None
-            if member:
-                display_name = member.display_name
-                guild_id     = vc.channel.guild.id
-                break
-
-        if not guild_id:
-            print(f"{Fore.RED}Mid-session flush: guild_id not found for {uid}, skipping.")
-            continue
-
-        print(f"{Fore.BLUE}Mid-session flush: {display_name} — {duration_m} min.")
-        commit_session(uid, guild_id, display_name, duration_m)
-        user_join_times[uid] = now
-
-@flush_active_sessions.before_loop
-async def before_flush():
     await bot.wait_until_ready()
 
 
@@ -399,8 +382,7 @@ async def on_ready():
         print(f"{Fore.RED}Error syncing commands: {e}")
 
     poll_voice_channels.start()
-    flush_active_sessions.start()
-    print(f"{Fore.CYAN}Voice poll started (60s). Mid-session flush every 30 min.")
+    print(f"{Fore.CYAN}Voice poll started (60s). Progress saved every tick.")
 
     if not bot.user:
         return
